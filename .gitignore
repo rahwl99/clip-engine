@@ -1,0 +1,13 @@
+# Environment
+.env
+
+# Output
+output/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Project
+plan.md
