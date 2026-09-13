@@ -108,22 +108,39 @@ def _parse_json3_events(data: dict) -> list[dict]:
         start_ms: int = event.get("tStartMs", 0)
         duration_ms: int = event.get("dDurationMs", 0)
 
+        words = []
         text_parts = []
         for seg in segs:
             cleaned = seg.get("utf8", "").strip()
             cleaned = re.sub(r"\s+", " ", cleaned)
             if cleaned and cleaned != "\n":
                 text_parts.append(cleaned)
+                offset_ms = seg.get("tOffsetMs")
+                if offset_ms is not None:
+                    w_start_s = round((start_ms + offset_ms) / 1000.0, 3)
+                    w_dur_ms = seg.get("dDurationMs")
+                    if w_dur_ms:
+                        w_end_s = round((start_ms + offset_ms + w_dur_ms) / 1000.0, 3)
+                    else:
+                        w_end_s = round((start_ms + duration_ms) / 1000.0, 3)
+                    words.append({"word": cleaned, "start": w_start_s, "end": w_end_s})
 
         text = " ".join(text_parts).strip()
         if not text:
             continue
 
-        segments.append({
+        seg_entry = {
             "start": round(start_ms / 1000.0, 3),
             "end": round((start_ms + duration_ms) / 1000.0, 3),
             "text": text,
-        })
+        }
+        if words:
+            for idx in range(len(words) - 1):
+                if words[idx]["end"] > words[idx + 1]["start"]:
+                    words[idx]["end"] = words[idx + 1]["start"]
+            seg_entry["words"] = words
+
+        segments.append(seg_entry)
 
     return segments
 

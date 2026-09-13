@@ -14,11 +14,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from transcript import get_transcript
-from analyzer import analyze_transcript
-from downloader import download_video
-from clipper import check_ffmpeg, generate_clip
-from models import Clip, ClipResult
+from core.transcript import get_transcript
+from core.analyzer import analyze_transcript
+from core.downloader import download_video
+from core.clipper import check_ffmpeg, generate_clip
+from core.models import Clip, ClipResult
 
 OUTPUT_DIR = Path("output")
 
@@ -38,7 +38,7 @@ def main() -> None:
     # ── Step 1: Extract video info ────────────────────────────────────
     print("[1/5] Extracting video information...")
     try:
-        from transcript import extract_video_id
+        from core.transcript import extract_video_id
         video_id = extract_video_id(url)
     except ValueError as exc:
         print(f"  Error: {exc}")
@@ -81,7 +81,7 @@ def main() -> None:
     source_path = Path(tmpdir) / f"{video_id}.mp4"
 
     try:
-        source_video = download_video(url, source_path)
+        source_video = download_video(url, source_path, quality="360p")
     except RuntimeError as exc:
         print(f"  Error: {exc}")
         sys.exit(1)

@@ -1,13 +1,33 @@
-# Environment
+# Environment & Secrets
 .env
+.env.local
 
 # Output
 output/
 
-# Python
+# Python & Caching
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
 .venv/
+env/
+venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# IDE & Editor Files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Operating System Files
+.DS_Store
+Thumbs.db
 
 # Project
 plan.md
+info.md

@@ -6,7 +6,7 @@ import os
 
 from google import genai
 
-from models import Clip
+from core.models import Clip
 
 logger = logging.getLogger(__name__)
 
