@@ -31,6 +31,17 @@ python main.py <youtube-url>
 
 Downloads a lightweight (360p) proxy video, identifies high-potential clips via Gemini, and generates preview-quality MP4 clips alongside a `clips.json` manifest.
 
+#### Customizing Clip / Video Length
+At the top of [main.py], you can change the target video duration:
+```python
+# ── Video Length Configuration (Edit Here) ────────────────────────────
+MIN_DURATION: int = 30   # Minimum clip duration in seconds
+MAX_DURATION: int = 90   # Maximum clip duration in seconds
+```
+* **Short clips (Shorts/Reels/TikTok)**: `MIN_DURATION = 30`, `MAX_DURATION = 90`
+* **Medium segments (highlights/topics)**: `MIN_DURATION = 90`, `MAX_DURATION = 300` (1.5 to 5 mins)
+* **Longer deep-dives / chapters**: `MIN_DURATION = 300`, `MAX_DURATION = 900` (5 to 15 mins)
+
 ### Step 2 — Generate vertical versions (Production Phase)
 
 ```bash
@@ -41,11 +52,49 @@ Downloads the source video in Full HD (1080p), reads the existing `clips.json`, 
 
 Optional flags:
 ```bash
-# Overwrite previously processed vertical clips
+# Overwrite previously processed clips
 python process.py <video_id> --force
+
+# Disable 9:16 vertical crop (keep original aspect ratio / resolution)
+python process.py <video_id> --no-vertical
+# Aliases: --no-crop, --no-9-16
+
+# Disable face tracking (use static centered crop when 9:16 is enabled)
+python process.py <video_id> --no-face-tracking
+# Alias: --no-face-track
+
+# Disable burned-in subtitles
+python process.py <video_id> --no-subtitles
+# Alias: --no-subs
+
+# Combine toggles (e.g. original aspect ratio with subtitles, without face tracking)
+python process.py <video_id> --no-vertical --no-face-tracking
 
 # Choose a specific subtitle highlight style
 python process.py <video_id> --subtitle-style highlight_cyan
+```
+
+### Configuring Feature Toggles via Code (Bools)
+
+You can configure defaults directly in [process.py]:
+
+```python
+# ── Feature Toggles (Bools in Code) ──────────────────────────────────
+ENABLE_VERTICAL: bool = True        # Convert to 9:16 vertical video
+ENABLE_FACE_TRACKING: bool = True   # Local OpenCV YuNet face tracking
+ENABLE_SUBTITLES: bool = True      # Burn-in animated ASS subtitles
+```
+
+Or invoke programmatically in Python:
+
+```python
+from process import process_clips
+
+# Process in original aspect ratio with subtitles
+process_clips("3qHkcs3kG44", vertical=False, subtitles=True)
+
+# Process vertical 9:16 with fast centered crop (skip face tracking)
+process_clips("3qHkcs3kG44", vertical=True, face_tracking=False)
 ```
 
 > **Note:** Step 2 requires that Step 1 has already been run for the same video. The `<video_id>` is the 11-character YouTube video identifier (e.g. `3qHkcs3kG44`).

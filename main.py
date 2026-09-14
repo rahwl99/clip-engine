@@ -22,6 +22,16 @@ from core.models import Clip, ClipResult
 
 OUTPUT_DIR = Path("output")
 
+# ── Video Length Configuration (Edit Here) ────────────────────────────
+# Set your desired clip duration in seconds (highlighted for easy editing):
+# Examples:
+#   Short clips (Shorts, Reels, TikTok):  MIN_DURATION = 30,  MAX_DURATION = 90
+#   Medium clips (highlights, topics):   MIN_DURATION = 90,  MAX_DURATION = 300   (1.5 to 5 mins)
+#   Longer deep-dives / chapters:        MIN_DURATION = 300, MAX_DURATION = 900   (5 to 15 mins)
+# ─────────────────────────────────────────────────────────────────────
+MIN_DURATION: int = 30   # Minimum clip duration in seconds
+MAX_DURATION: int = 90   # Maximum clip duration in seconds
+
 
 def main() -> None:
     if len(sys.argv) < 2:
@@ -57,9 +67,13 @@ def main() -> None:
     print(f"  {len(segments)} segments loaded.")
 
     # ── Step 3: Gemini analysis ───────────────────────────────────────
-    print("[3/5] Finding high-potential clips with Gemini...")
+    print(f"[3/5] Finding high-potential clips with Gemini ({MIN_DURATION}s–{MAX_DURATION}s target)...")
     try:
-        clip_dicts = analyze_transcript(segments)
+        clip_dicts = analyze_transcript(
+            segments,
+            min_duration=MIN_DURATION,
+            max_duration=MAX_DURATION,
+        )
     except RuntimeError as exc:
         print(f"  Error: {exc}")
         sys.exit(1)

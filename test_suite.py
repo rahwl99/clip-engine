@@ -201,6 +201,228 @@ def test_subtitle_styles_and_word_highlighting():
     print("  ✓ Subtitle styles and active word highlighting passed")
 
 
+def test_cli_argument_toggles():
+    print("[TEST] CLI argument toggles...")
+    from unittest.mock import patch
+    from process import parse_args
+
+    # Default flags
+    with patch("sys.argv", ["process.py", "test_vid"]):
+        args = parse_args()
+        assert args.vertical is True, "Default vertical should be True"
+        assert args.face_tracking is True, "Default face_tracking should be True"
+        assert args.subtitles is True, "Default subtitles should be True"
+
+    # Negative flags
+    with patch("sys.argv", ["process.py", "test_vid", "--no-vertical"]):
+        args = parse_args()
+        assert args.vertical is False, "--no-vertical should set vertical to False"
+
+    with patch("sys.argv", ["process.py", "test_vid", "--no-crop"]):
+        args = parse_args()
+        assert args.vertical is False, "--no-crop should set vertical to False"
+
+    with patch("sys.argv", ["process.py", "test_vid", "--no-9-16"]):
+        args = parse_args()
+        assert args.vertical is False, "--no-9-16 should set vertical to False"
+
+    with patch("sys.argv", ["process.py", "test_vid", "--no-face-tracking"]):
+        args = parse_args()
+        assert args.face_tracking is False, "--no-face-tracking should set face_tracking to False"
+
+    with patch("sys.argv", ["process.py", "test_vid", "--no-face-track"]):
+        args = parse_args()
+        assert args.face_tracking is False, "--no-face-track should set face_tracking to False"
+
+    with patch("sys.argv", ["process.py", "test_vid", "--no-subtitles"]):
+        args = parse_args()
+        assert args.subtitles is False, "--no-subtitles should set subtitles to False"
+
+    with patch("sys.argv", ["process.py", "test_vid", "--no-subs"]):
+        args = parse_args()
+        assert args.subtitles is False, "--no-subs should set subtitles to False"
+
+    # All disabled
+    with patch("sys.argv", ["process.py", "test_vid", "--no-vertical", "--no-face-tracking", "--no-subtitles"]):
+        args = parse_args()
+        assert args.vertical is False
+        assert args.face_tracking is False
+        assert args.subtitles is False
+
+    # Explicit positive flags
+    with patch("sys.argv", ["process.py", "test_vid", "--vertical", "--face-tracking", "--subtitles"]):
+        args = parse_args()
+        assert args.vertical is True
+        assert args.face_tracking is True
+        assert args.subtitles is True
+
+    print("  ✓ CLI argument toggles and alias parsing passed")
+
+
+def test_code_boolean_toggles():
+    print("[TEST] Code boolean configuration and process_clips signature...")
+    import inspect
+    import process
+
+    # Verify exported top-level constants
+    assert hasattr(process, "ENABLE_VERTICAL"), "process.py must export ENABLE_VERTICAL"
+    assert hasattr(process, "ENABLE_FACE_TRACKING"), "process.py must export ENABLE_FACE_TRACKING"
+    assert hasattr(process, "ENABLE_SUBTITLES"), "process.py must export ENABLE_SUBTITLES"
+    assert isinstance(process.ENABLE_VERTICAL, bool)
+    assert isinstance(process.ENABLE_FACE_TRACKING, bool)
+    assert isinstance(process.ENABLE_SUBTITLES, bool)
+
+    # Verify process_clips signature has default boolean parameters
+    sig = inspect.signature(process.process_clips)
+    params = sig.parameters
+    assert "vertical" in params, "process_clips must accept 'vertical' parameter"
+    assert "face_tracking" in params, "process_clips must accept 'face_tracking' parameter"
+    assert "subtitles" in params, "process_clips must accept 'subtitles' parameter"
+    assert params["vertical"].default == process.ENABLE_VERTICAL
+    assert params["face_tracking"].default == process.ENABLE_FACE_TRACKING
+    assert params["subtitles"].default == process.ENABLE_SUBTITLES
+
+    print("  ✓ Code boolean toggles and process_clips signature passed")
+
+
+def test_ass_generation_horizontal_vs_vertical():
+    print("[TEST] ASS subtitle generation for horizontal vs vertical resolutions...")
+    chunks = [
+        {
+            "start": 0.0,
+            "end": 2.0,
+            "text": "TEST CAPTION",
+            "words": [{"word": "TEST", "start": 0.0, "end": 1.0}, {"word": "CAPTION", "start": 1.0, "end": 2.0}],
+        }
+    ]
+
+    with tempfile.NamedTemporaryFile(suffix=".ass", delete=False, mode="w", encoding="utf-8") as tmp:
+        ass_path = Path(tmp.name)
+
+    try:
+        # 1. Vertical 9:16 (1080x1920)
+        generate_ass_file(chunks, ass_path, video_width=1080, video_height=1920)
+        v_content = ass_path.read_text(encoding="utf-8")
+        assert "PlayResX: 1080" in v_content
+        assert "PlayResY: 1920" in v_content
+        assert ",78," in v_content, "Vertical ASS should use 78pt font"
+        assert ",360," in v_content, "Vertical ASS should use 360 vertical margin"
+
+        # 2. Horizontal 16:9 (1920x1080)
+        generate_ass_file(chunks, ass_path, video_width=1920, video_height=1080)
+        h_content = ass_path.read_text(encoding="utf-8")
+        assert "PlayResX: 1920" in h_content
+        assert "PlayResY: 1080" in h_content
+        assert ",44," in h_content, "Horizontal ASS should scale font size down proportionally"
+        assert ",108," in h_content, "Horizontal ASS should use bottom-aligned 108 vertical margin"
+
+    finally:
+        if ass_path.is_file():
+            ass_path.unlink()
+
+    print("  ✓ Horizontal vs vertical ASS subtitle generation passed")
+
+
+def test_processor_vertical_filter_toggle():
+    print("[TEST] Processor FFmpeg command with vertical toggle...")
+    from unittest.mock import patch, MagicMock
+    from processing.processor import generate_vertical_clip, generate_processed_clip
+
+    assert generate_processed_clip is generate_vertical_clip, "generate_processed_clip should alias generate_vertical_clip"
+
+    fake_source = Path("dummy_source.mp4")
+    fake_output = Path("dummy_output.mp4")
+
+    # Mock _probe_dimensions and subprocess.run
+    with patch("processing.processor._probe_dimensions", return_value=(1920, 1080)), \
+         patch("subprocess.run") as mock_run, \
+         patch("pathlib.Path.is_file", return_value=True), \
+         patch("pathlib.Path.mkdir"):
+
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        # Test 1: vertical=True
+        generate_vertical_clip(fake_source, 0.0, 5.0, fake_output, vertical=True)
+        call_args_vertical = mock_run.call_args[0][0]
+        cmd_str_v = " ".join(call_args_vertical)
+        assert "-vf" in call_args_vertical, "Vertical clip must have -vf filter"
+        assert "scale=1080:1920" in cmd_str_v, "Vertical clip must scale to 1080:1920"
+        assert "crop=" in cmd_str_v, "Vertical clip must crop"
+
+        # Test 2: vertical=False (no subtitles)
+        generate_vertical_clip(fake_source, 0.0, 5.0, fake_output, vertical=False)
+        call_args_horizontal = mock_run.call_args[0][0]
+        cmd_str_h = " ".join(call_args_horizontal)
+        assert "-vf" not in call_args_horizontal, "Non-vertical clip without subs should not have -vf"
+        assert "scale=1080:1920" not in cmd_str_h
+        assert "crop=" not in cmd_str_h
+
+        # Test 3: vertical=False (with subtitles)
+        fake_ass = Path("dummy.ass")
+        with patch.object(Path, "is_file", return_value=True):
+            generate_vertical_clip(fake_source, 0.0, 5.0, fake_output, vertical=False, ass_path=fake_ass)
+            call_args_with_subs = mock_run.call_args[0][0]
+            cmd_str_subs = " ".join(call_args_with_subs)
+            assert "-vf" in call_args_with_subs, "Non-vertical clip with subs must include -vf"
+            assert "subtitles=" in cmd_str_subs
+            assert "crop=" not in cmd_str_subs
+            assert "scale=1080:1920" not in cmd_str_subs
+
+    print("  ✓ Processor FFmpeg vertical toggle passed")
+
+
+def test_video_duration_configuration():
+    print("[TEST] Video duration configuration and prompt generation...")
+    import inspect
+    import main
+    from core.analyzer import (
+        DEFAULT_MIN_DURATION,
+        DEFAULT_MAX_DURATION,
+        _build_system_prompt,
+        _build_user_prompt,
+        analyze_transcript,
+    )
+
+    # Check that variables exist and are prominently accessible
+    assert hasattr(main, "MIN_DURATION"), "main.py must expose MIN_DURATION"
+    assert hasattr(main, "MAX_DURATION"), "main.py must expose MAX_DURATION"
+    assert isinstance(main.MIN_DURATION, int)
+    assert isinstance(main.MAX_DURATION, int)
+    assert main.MIN_DURATION > 0
+    assert main.MAX_DURATION > main.MIN_DURATION
+
+    # Check analyzer defaults
+    assert DEFAULT_MIN_DURATION == 30
+    assert DEFAULT_MAX_DURATION == 90
+
+    # Test short prompt generation
+    sys_prompt_short = _build_system_prompt(30, 90)
+    assert "30 and 90 seconds long (30s–90s)" in sys_prompt_short
+    assert "short-form" in sys_prompt_short
+
+    # Test medium prompt generation
+    sys_prompt_med = _build_system_prompt(90, 300)
+    assert "90 and 300 seconds long (90s–300s)" in sys_prompt_med
+    assert "medium-length" in sys_prompt_med
+
+    # Test long prompt generation
+    sys_prompt_long = _build_system_prompt(300, 900)
+    assert "300 and 900 seconds long (300s–900s)" in sys_prompt_long
+    assert "in-depth chapters" in sys_prompt_long
+
+    # Test user prompt duration injection
+    user_prompt = _build_user_prompt("dummy transcript", 120, 360, 5)
+    assert "between 120 and 360 seconds in duration" in user_prompt
+    assert "Identify up to 5" in user_prompt
+
+    # Verify analyze_transcript signature
+    sig = inspect.signature(analyze_transcript)
+    assert "min_duration" in sig.parameters
+    assert "max_duration" in sig.parameters
+
+    print("  ✓ Video duration configuration and prompt generation passed")
+
+
 def run_all():
     print("=" * 60)
     print("RUNNING CLIPT AUTOMATED TEST SUITE")
@@ -211,6 +433,11 @@ def run_all():
     test_camera_smoothing_and_bounds()
     test_missing_transcript_fallback()
     test_no_face_fallback()
+    test_cli_argument_toggles()
+    test_code_boolean_toggles()
+    test_ass_generation_horizontal_vs_vertical()
+    test_processor_vertical_filter_toggle()
+    test_video_duration_configuration()
     print("=" * 60)
     print("ALL TESTS PASSED SUCCESSFULLY!")
     print("=" * 60)
@@ -218,3 +445,5 @@ def run_all():
 
 if __name__ == "__main__":
     run_all()
+
+

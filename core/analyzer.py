@@ -10,35 +10,68 @@ from core.models import Clip
 
 logger = logging.getLogger(__name__)
 
+# ── Video Length Configuration (Default Duration Bounds) ──────────────
+# Set your desired clip duration in seconds (highlighted for easy editing):
+#   Short clips (Shorts, Reels, TikTok):  MIN_DURATION = 30,  MAX_DURATION = 90
+#   Medium clips (highlights, topics):   MIN_DURATION = 90,  MAX_DURATION = 300   (1.5 to 5 min)
+#   Longer deep-dives / chapters:        MIN_DURATION = 300, MAX_DURATION = 900   (5 to 15 min)
+# ─────────────────────────────────────────────────────────────────────
+DEFAULT_MIN_DURATION: int = 30   # Minimum clip duration in seconds
+DEFAULT_MAX_DURATION: int = 90   # Maximum clip duration in seconds
 MAX_CLIPS: int = 10
 
 
-# ── Prompt ────────────────────────────────────────────────────────────
+# ── Prompt Generation ─────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """\
-You are a professional short-form video editor and content strategist.
+def _build_system_prompt(min_duration: int, max_duration: int) -> str:
+    """Construct the Gemini system instruction tailored to the desired duration."""
+    if max_duration <= 90:
+        target_type = "short-form clips (YouTube Shorts, Instagram Reels, or TikTok)"
+        pacing_guidance = (
+            "Prioritise strong hooks, curiosity, surprising information, "
+            "emotional moments, and punchy self-contained context."
+        )
+    elif max_duration <= 300:
+        target_type = f"medium-length standalone video segments ({min_duration / 60:.1f}–{max_duration / 60:.1f} minutes)"
+        pacing_guidance = (
+            "Prioritise complete topic discussions, engaging explanations, "
+            "stories with full arcs, and high-value insights."
+        )
+    else:
+        target_type = f"in-depth chapters and long-form topic breakdowns ({min_duration / 60:.1f}–{max_duration / 60:.1f} minutes)"
+        pacing_guidance = (
+            "Prioritise comprehensive deep-dives, detailed interview answers, "
+            "and full conceptual explanations."
+        )
+
+    return f"""\
+You are a professional video editor and content strategist.
 
 Your job is to analyse a timestamped video transcript and identify the strongest \
-self-contained segments that would perform well as YouTube Shorts, Instagram Reels, \
-or TikTok clips.
+self-contained segments that would perform well as {target_type}.
 
 Rules:
 - Only use timestamps that appear in the provided transcript. Never invent timestamps.
-- Each clip should be 30–90 seconds long.
+- Each clip MUST be between {min_duration} and {max_duration} seconds long ({min_duration}s–{max_duration}s).
 - Each clip must be self-contained — a viewer with no prior context should understand it.
-- Prioritise strong hooks, curiosity, surprising information, emotional moments, \
-  useful insights, controversial opinions, stories, clear payoffs, and standalone context.
+- {pacing_guidance}
 - Avoid greetings, filler, repetitive sections, clips that require excessive context, \
   and overlapping clips.
 - Return ONLY valid JSON. No markdown fences, no commentary outside the JSON.
 """
 
 
-def _build_user_prompt(timestamped_transcript: str) -> str:
+def _build_user_prompt(
+    timestamped_transcript: str,
+    min_duration: int,
+    max_duration: int,
+    max_clips: int,
+) -> str:
+    """Construct user prompt specifying desired duration range."""
     return f"""\
 Below is the full timestamped transcript of a video.
 
-Identify up to {MAX_CLIPS} of the highest-potential short-form clips.
+Identify up to {max_clips} of the highest-potential segments between {min_duration} and {max_duration} seconds in duration.
 
 For each clip return a JSON object with exactly these fields:
 - "start": clip start time in seconds (float)
@@ -58,13 +91,27 @@ TRANSCRIPT:
 
 # ── Gemini call ───────────────────────────────────────────────────────
 
-def analyze_transcript(segments: list[dict]) -> list[dict]:
+def analyze_transcript(
+    segments: list[dict],
+    min_duration: int = DEFAULT_MIN_DURATION,
+    max_duration: int = DEFAULT_MAX_DURATION,
+    max_clips: int = MAX_CLIPS,
+) -> list[dict]:
     """Send transcript segments to Gemini and return validated clip dicts.
+
+    Parameters:
+        segments: Timestamped transcript segments.
+        min_duration: Minimum clip duration in seconds (default: DEFAULT_MIN_DURATION).
+        max_duration: Maximum clip duration in seconds (default: DEFAULT_MAX_DURATION).
+        max_clips: Maximum number of clips to return.
 
     Reads GEMINI_API_KEY from environment. Returns a list of clip dicts
     ready for JSON serialisation.
     """
-    from transcript import format_transcript
+    try:
+        from core.transcript import format_transcript
+    except ImportError:
+        from transcript import format_transcript
 
     api_key = os.environ.get("GEMINI_API_KEY", "")
     if not api_key or api_key == "your-api-key-here":
@@ -73,7 +120,8 @@ def analyze_transcript(segments: list[dict]) -> list[dict]:
         )
 
     timestamped_text = format_transcript(segments)
-    user_prompt = _build_user_prompt(timestamped_text)
+    system_prompt = _build_system_prompt(min_duration, max_duration)
+    user_prompt = _build_user_prompt(timestamped_text, min_duration, max_duration, max_clips)
 
     client = genai.Client(api_key=api_key)
 
@@ -82,7 +130,7 @@ def analyze_transcript(segments: list[dict]) -> list[dict]:
             model="gemini-3.5-flash",
             contents=user_prompt,
             config=genai.types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
+                system_instruction=system_prompt,
                 temperature=0.4,
                 automatic_function_calling=genai.types.AutomaticFunctionCallingConfig(
                     disable=True,

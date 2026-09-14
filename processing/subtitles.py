@@ -394,8 +394,15 @@ def generate_ass_file(
     style_cfg = get_subtitle_style(style)
 
     f_name = font_name or style_cfg.get("font_name", "Arial")
-    f_size = font_size or style_cfg.get("font_size", 78)
-    m_v = margin_v if margin_v is not None else style_cfg.get("margin_v", 360)
+
+    # If video is horizontal (landscape), scale font size and margin_v appropriately
+    if video_width > video_height:
+        f_size = font_size or max(36, int(round(style_cfg.get("font_size", 78) * (video_height / 1920))))
+        m_v = margin_v if margin_v is not None else max(40, int(round(video_height * 0.10)))
+    else:
+        f_size = font_size or style_cfg.get("font_size", 78)
+        m_v = margin_v if margin_v is not None else style_cfg.get("margin_v", 360)
+
     primary_col = style_cfg.get("primary_color", "&H00FFFFFF")
     outline_col = style_cfg.get("outline_color", "&H00000000")
     outline_w = style_cfg.get("outline_width", 5)
