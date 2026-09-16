@@ -6,19 +6,15 @@ import os
 
 from google import genai
 
+from core.config import (
+    DEFAULT_MAX_DURATION,
+    DEFAULT_MIN_DURATION,
+    MAX_CLIPS,
+)
+from core.exceptions import AnalysisError, ConfigurationError
 from core.models import Clip
 
 logger = logging.getLogger(__name__)
-
-# ── Video Length Configuration (Default Duration Bounds) ──────────────
-# Set your desired clip duration in seconds (highlighted for easy editing):
-#   Short clips (Shorts, Reels, TikTok):  MIN_DURATION = 30,  MAX_DURATION = 90
-#   Medium clips (highlights, topics):   MIN_DURATION = 90,  MAX_DURATION = 300   (1.5 to 5 min)
-#   Longer deep-dives / chapters:        MIN_DURATION = 300, MAX_DURATION = 900   (5 to 15 min)
-# ─────────────────────────────────────────────────────────────────────
-DEFAULT_MIN_DURATION: int = 30   # Minimum clip duration in seconds
-DEFAULT_MAX_DURATION: int = 90   # Maximum clip duration in seconds
-MAX_CLIPS: int = 10
 
 
 # ── Prompt Generation ─────────────────────────────────────────────────
@@ -96,6 +92,7 @@ def analyze_transcript(
     min_duration: int = DEFAULT_MIN_DURATION,
     max_duration: int = DEFAULT_MAX_DURATION,
     max_clips: int = MAX_CLIPS,
+    api_key: str | None = None,
 ) -> list[dict]:
     """Send transcript segments to Gemini and return validated clip dicts.
 
@@ -104,30 +101,30 @@ def analyze_transcript(
         min_duration: Minimum clip duration in seconds (default: DEFAULT_MIN_DURATION).
         max_duration: Maximum clip duration in seconds (default: DEFAULT_MAX_DURATION).
         max_clips: Maximum number of clips to return.
+        api_key: Optional Gemini API key. If omitted, read from GEMINI_API_KEY environment variable.
 
-    Reads GEMINI_API_KEY from environment. Returns a list of clip dicts
-    ready for JSON serialisation.
+    Returns a list of clip dicts ready for JSON serialisation.
     """
     try:
         from core.transcript import format_transcript
     except ImportError:
         from transcript import format_transcript
 
-    api_key = os.environ.get("GEMINI_API_KEY", "")
-    if not api_key or api_key == "your-api-key-here":
-        raise RuntimeError(
-            "GEMINI_API_KEY is not set. Add it to your .env file."
+    resolved_api_key = api_key or os.environ.get("GEMINI_API_KEY", "")
+    if not resolved_api_key or resolved_api_key == "your-api-key-here":
+        raise ConfigurationError(
+            "GEMINI_API_KEY is not set. Add it to your .env file or pass it directly."
         )
 
     timestamped_text = format_transcript(segments)
     system_prompt = _build_system_prompt(min_duration, max_duration)
     user_prompt = _build_user_prompt(timestamped_text, min_duration, max_duration, max_clips)
 
-    client = genai.Client(api_key=api_key)
+    client = genai.Client(api_key=resolved_api_key)
 
     try:
         response = client.models.generate_content(
-            model="gemini-3.5-flash",
+            model="gemini-3.8-flash",
             contents=user_prompt,
             config=genai.types.GenerateContentConfig(
                 system_instruction=system_prompt,
@@ -138,21 +135,21 @@ def analyze_transcript(
             ),
         )
     except Exception as exc:
-        raise RuntimeError(f"Gemini API call failed: {exc}") from exc
+        raise AnalysisError(f"Gemini API call failed: {exc}") from exc
 
     text = response.text
     if not text:
-        raise RuntimeError("Gemini returned an empty response.")
+        raise AnalysisError("Gemini returned an empty response.")
 
     clips = _parse_response(text)
 
     if not clips:
-        raise RuntimeError("Gemini returned no valid clips.")
+        raise AnalysisError("Gemini returned no valid clips.")
 
-    # Sort by score, remove overlaps, cap at MAX_CLIPS.
+    # Sort by score, remove overlaps, cap at max_clips.
     clips.sort(key=lambda c: c.score, reverse=True)
     clips = _remove_overlapping(clips)
-    clips = clips[:MAX_CLIPS]
+    clips = clips[:max_clips]
 
     return [c.model_dump() for c in clips]
 
@@ -173,13 +170,13 @@ def _parse_response(raw: str) -> list[Clip]:
     try:
         data = json.loads(cleaned)
     except json.JSONDecodeError as exc:
-        raise RuntimeError(
+        raise AnalysisError(
             f"Could not parse Gemini response as JSON: {exc}\n"
             f"Response (first 500 chars):\n{raw[:500]}"
         ) from exc
 
     if not isinstance(data, list):
-        raise RuntimeError(f"Expected JSON array from Gemini, got {type(data).__name__}.")
+        raise AnalysisError(f"Expected JSON array from Gemini, got {type(data).__name__}.")
 
     clips: list[Clip] = []
     for i, item in enumerate(data):

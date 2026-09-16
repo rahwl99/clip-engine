@@ -3,10 +3,11 @@
 Supports dynamic face-tracking crop and burned-in ASS subtitles.
 """
 
-import json
 import logging
-import subprocess
 from pathlib import Path
+
+from core.exceptions import FFmpegError, ProcessingError
+from core.ffmpeg import probe_video_dimensions, run_ffmpeg
 
 logger = logging.getLogger(__name__)
 
@@ -14,32 +15,9 @@ logger = logging.getLogger(__name__)
 def _probe_dimensions(source: Path) -> tuple[int, int]:
     """Return (width, height) of *source* using ffprobe.
 
-    Raises RuntimeError if ffprobe fails or the dimensions cannot be parsed.
+    Maintained for backward compatibility and test mock compatibility.
     """
-    cmd = [
-        "ffprobe",
-        "-v", "error",
-        "-select_streams", "v:0",
-        "-show_entries", "stream=width,height",
-        "-of", "json",
-        str(source),
-    ]
-
-    result = subprocess.run(cmd, capture_output=True, text=True)
-
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"ffprobe failed for {source.name}: {result.stderr.strip()}"
-        )
-
-    try:
-        info = json.loads(result.stdout)
-        stream = info["streams"][0]
-        return int(stream["width"]), int(stream["height"])
-    except (json.JSONDecodeError, KeyError, IndexError, ValueError) as exc:
-        raise RuntimeError(
-            f"Could not parse video dimensions from ffprobe output: {exc}"
-        ) from exc
+    return probe_video_dimensions(source)
 
 
 def generate_vertical_clip(
@@ -62,12 +40,12 @@ def generate_vertical_clip(
 
     Burned-in ASS subtitles are applied when *ass_path* is provided.
     Audio is preserved (H.264 + AAC).
-    Raises RuntimeError on failure.
+    Raises ProcessingError / FFmpegError on failure.
     """
     duration = round(end - start, 3)
 
     if duration <= 0:
-        raise RuntimeError(
+        raise ProcessingError(
             f"Invalid clip duration: start={start}, end={end}, duration={duration}"
         )
 
@@ -123,20 +101,14 @@ def generate_vertical_clip(
         str(output),
     ])
 
-    logger.debug("FFmpeg command: %s", " ".join(cmd))
-
-    result = subprocess.run(cmd, capture_output=True, text=True)
-
-    if result.returncode != 0:
-        stderr_lines = result.stderr.strip().splitlines()
-        detail = "\n".join(stderr_lines[-5:]) if stderr_lines else "(no output)"
-        raise RuntimeError(f"FFmpeg failed for {output.name}:\n{detail}")
-
-    if not output.is_file():
-        raise RuntimeError(
-            f"FFmpeg exited successfully but {output.name} was not created."
-        )
+    run_ffmpeg(cmd, output_file=output)
 
 
 # Alias for general clip processing
 generate_processed_clip = generate_vertical_clip
+
+
+def process_video(*args, **kwargs):
+    """Process clips for a video ID into vertical/subtitled format."""
+    from core.pipeline import process_video as _process_video
+    return _process_video(*args, **kwargs)

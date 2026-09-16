@@ -88,16 +88,20 @@ ENABLE_SUBTITLES: bool = True      # Burn-in animated ASS subtitles
 Or invoke programmatically in Python:
 
 ```python
+from core.pipeline import analyze_video, process_video
+
+# Step 1: Editorial analysis & preview generation
+clip_result = analyze_video("https://www.youtube.com/watch?v=videoID")
+
+# Step 2: Production 9:16 vertical processing
+summary = process_video("videoID", vertical=True, face_tracking=True, subtitles=True)
+
+# Or use the legacy process_clips helper:
 from process import process_clips
-
-# Process in original aspect ratio with subtitles
-process_clips("3qHkcs3kG44", vertical=False, subtitles=True)
-
-# Process vertical 9:16 with fast centered crop (skip face tracking)
-process_clips("3qHkcs3kG44", vertical=True, face_tracking=False)
+process_clips("videoID", vertical=False, subtitles=True)
 ```
 
-> **Note:** Step 2 requires that Step 1 has already been run for the same video. The `<video_id>` is the 11-character YouTube video identifier (e.g. `3qHkcs3kG44`).
+> **Note:** Step 2 requires that Step 1 has already been run for the same video. The `<video_id>` is the 11-character YouTube video identifier (e.g. `videoID`).
 
 ---
 
@@ -106,15 +110,19 @@ process_clips("3qHkcs3kG44", vertical=True, face_tracking=False)
 ```
 clip-engine/
 ├── core/                              # Core pipeline & editorial modules
-│   ├── __init__.py
+│   ├── __init__.py                    # Lazy package exports (analyze_video, process_video)
 │   ├── analyzer.py                    # Gemini prompt engineering, API call, & deduplication
-│   ├── clipper.py                     # FFmpeg clip extraction & system PATH validator
+│   ├── clipper.py                     # FFmpeg clip extraction & cut generation
+│   ├── config.py                      # Centralized configuration & Path helpers
 │   ├── downloader.py                  # Multi-profile yt-dlp source video downloader (360p / 1080p)
+│   ├── exceptions.py                  # Domain exception hierarchy (CliptError, FFmpegError, etc.)
+│   ├── ffmpeg.py                      # Centralized FFmpeg/ffprobe execution & probe helpers
 │   ├── models.py                      # Pydantic data models (Clip, ClipResult)
+│   ├── pipeline.py                    # Job-isolated engine pipelines (analyze_video, process_video)
 │   └── transcript.py                  # YouTube subtitle retrieval, json3 parsing, & word offsets
 │
 ├── processing/                        # Production vertical video repurposing modules
-│   ├── __init__.py
+│   ├── __init__.py                    # Re-exports (generate_vertical_clip, process_video, etc.)
 │   ├── face_tracker.py                # OpenCV YuNet neural face detection & camera trajectory smoothing
 │   ├── processor.py                   # FFmpeg vertical 9:16 dynamic cropping & subtitle filter builder
 │   └── subtitles.py                   # ASS subtitle engine with active spoken-word highlighting & styles
@@ -124,7 +132,7 @@ clip-engine/
 │
 ├── main.py                            # CLI entry point — Phase 1 (Editorial & horizontal previews)
 ├── process.py                         # CLI entry point — Phase 2 (Production vertical 9:16 clips)
-├── test_suite.py                      # Comprehensive automated test suite
+├── test_suite.py                      # Comprehensive automated test suite (15 unit/pipeline tests)
 ├── requirements.txt                   # Direct Python dependencies
 ├── .env                               # Local secrets (GEMINI_API_KEY)
 ├── .gitignore                         # Git ignore configuration

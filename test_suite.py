@@ -423,6 +423,158 @@ def test_video_duration_configuration():
     print("  ✓ Video duration configuration and prompt generation passed")
 
 
+def test_configuration_and_paths():
+    print("[TEST] Configuration defaults, overrides, and path helpers...")
+    from core.config import (
+        EngineConfig,
+        DEFAULT_MIN_DURATION,
+        DEFAULT_MAX_DURATION,
+        ENABLE_VERTICAL,
+        ENABLE_FACE_TRACKING,
+        ENABLE_SUBTITLES,
+        get_video_dir,
+        get_processed_dir,
+        get_clips_json_path,
+        get_source_path,
+        get_transcript_path,
+    )
+
+    # 1. Config defaults
+    cfg = EngineConfig()
+    assert cfg.min_duration == DEFAULT_MIN_DURATION
+    assert cfg.max_duration == DEFAULT_MAX_DURATION
+    assert cfg.vertical == ENABLE_VERTICAL
+    assert cfg.face_tracking == ENABLE_FACE_TRACKING
+    assert cfg.subtitles == ENABLE_SUBTITLES
+
+    # 2. Config override
+    custom_cfg = EngineConfig(min_duration=60, max_duration=120, vertical=False)
+    assert custom_cfg.min_duration == 60
+    assert custom_cfg.max_duration == 120
+    assert custom_cfg.vertical is False
+
+    # 3. Path helpers with custom base directory
+    custom_base = Path("/custom/output")
+    vid_id = "test_vid_123"
+    assert get_video_dir(vid_id, base_dir=custom_base) == custom_base / vid_id
+    assert get_processed_dir(vid_id, base_dir=custom_base) == custom_base / vid_id / "processedFiles"
+    assert get_clips_json_path(vid_id, base_dir=custom_base) == custom_base / vid_id / "clips.json"
+    assert get_source_path(vid_id, base_dir=custom_base) == custom_base / vid_id / "source.mp4"
+    assert get_transcript_path(vid_id, base_dir=custom_base) == custom_base / vid_id / "transcript.json"
+
+    print("  ✓ Configuration defaults, overrides, and path helpers passed")
+
+
+def test_video_id_validation():
+    print("[TEST] Video ID extraction and URL validation...")
+    from core.transcript import extract_video_id
+    from core.exceptions import VideoIDError
+
+    test_cases = [
+        ("https://www.youtube.com/watch?v=dQw4w9WgXcQ", "dQw4w9WgXcQ"),
+        ("http://youtube.com/watch?v=dQw4w9WgXcQ&feature=share", "dQw4w9WgXcQ"),
+        ("https://youtu.be/dQw4w9WgXcQ", "dQw4w9WgXcQ"),
+        ("https://www.youtube.com/shorts/dQw4w9WgXcQ", "dQw4w9WgXcQ"),
+        ("https://www.youtube.com/embed/dQw4w9WgXcQ", "dQw4w9WgXcQ"),
+        ("dQw4w9WgXcQ", "dQw4w9WgXcQ"),
+    ]
+
+    for url, expected in test_cases:
+        assert extract_video_id(url) == expected, f"Failed for {url}"
+
+    # Invalid inputs
+    invalid_inputs = [
+        "https://notyoutube.com/watch?v=12345",
+        "invalid_video_id",
+        "",
+        "   ",
+        "https://youtube.com/",
+    ]
+    for bad in invalid_inputs:
+        try:
+            extract_video_id(bad)
+            assert False, f"Expected VideoIDError for {bad}"
+        except VideoIDError:
+            pass
+        except ValueError:
+            pass
+
+    print("  ✓ Video ID extraction and URL validation passed")
+
+
+def test_exception_hierarchy():
+    print("[TEST] Domain exception hierarchy and backward compatibility...")
+    from core.exceptions import (
+        CliptError,
+        ConfigurationError,
+        VideoIDError,
+        TranscriptError,
+        AnalysisError,
+        DownloadError,
+        FFmpegError,
+        ProcessingError,
+    )
+
+    # Base class check
+    for exc_cls in (
+        ConfigurationError,
+        VideoIDError,
+        TranscriptError,
+        AnalysisError,
+        DownloadError,
+        FFmpegError,
+        ProcessingError,
+    ):
+        assert issubclass(exc_cls, CliptError)
+
+    # Backward compatibility with standard library exceptions
+    assert issubclass(VideoIDError, ValueError)
+    assert issubclass(TranscriptError, RuntimeError)
+    assert issubclass(AnalysisError, RuntimeError)
+    assert issubclass(DownloadError, RuntimeError)
+    assert issubclass(FFmpegError, RuntimeError)
+    assert issubclass(ProcessingError, RuntimeError)
+
+    print("  ✓ Domain exception hierarchy and backward compatibility passed")
+
+
+def test_programmatic_pipeline_interface():
+    print("[TEST] Programmatic engine interface (API readiness)...")
+    from core import analyze_video as av_from_core, process_video as pv_from_core
+    from core.pipeline import analyze_video, process_video
+    from processing import process_video as pv_from_proc
+    from processing.processor import process_video as pv_from_processor
+    from core.exceptions import ProcessingError
+
+    # Assert callable exports across packages
+    assert callable(analyze_video)
+    assert callable(process_video)
+    assert callable(av_from_core)
+    assert callable(pv_from_core)
+    assert callable(pv_from_proc)
+    assert callable(pv_from_processor)
+
+    # Verify process_video raises ProcessingError when project dir does not exist (does NOT call sys.exit)
+    try:
+        process_video("nonexist123", output_dir=tempfile.mkdtemp())
+        assert False, "Expected ProcessingError for nonexistent video project"
+    except ProcessingError as exc:
+        assert "nonexist123" in str(exc)
+
+    # Verify progress callback receives messages without error
+    received_messages = []
+    try:
+        process_video(
+            "dummy123456",
+            output_dir=tempfile.mkdtemp(),
+            progress_callback=received_messages.append,
+        )
+    except ProcessingError:
+        pass
+
+    print("  ✓ Programmatic engine interface passed without calling sys.exit()")
+
+
 def run_all():
     print("=" * 60)
     print("RUNNING CLIPT AUTOMATED TEST SUITE")
@@ -438,6 +590,10 @@ def run_all():
     test_ass_generation_horizontal_vs_vertical()
     test_processor_vertical_filter_toggle()
     test_video_duration_configuration()
+    test_configuration_and_paths()
+    test_video_id_validation()
+    test_exception_hierarchy()
+    test_programmatic_pipeline_interface()
     print("=" * 60)
     print("ALL TESTS PASSED SUCCESSFULLY!")
     print("=" * 60)

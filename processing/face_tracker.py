@@ -11,12 +11,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
+from core.config import DEFAULT_MODEL_PATH as _CONFIG_MODEL_PATH
+from core.ffmpeg import probe_video_dimensions
+
 logger = logging.getLogger(__name__)
 
-# Default path for YuNet face detector model (checks project root or local models/)
+# Default path for YuNet face detector model (checks config, project root, or local models/)
 _root_model = Path(__file__).resolve().parent.parent / "models" / "face_detection_yunet_2023mar.onnx"
 _local_model = Path(__file__).resolve().parent / "models" / "face_detection_yunet_2023mar.onnx"
-DEFAULT_MODEL_PATH = _root_model if _root_model.is_file() else _local_model
+DEFAULT_MODEL_PATH = (
+    _CONFIG_MODEL_PATH
+    if _CONFIG_MODEL_PATH.is_file()
+    else (_root_model if _root_model.is_file() else _local_model)
+)
 
 
 @dataclass
@@ -88,7 +95,7 @@ class FaceDetector:
         import cv2
 
         self._cv2 = cv2
-        self.model_path = model_path or DEFAULT_MODEL_PATH
+        self.model_path = Path(model_path) if model_path else DEFAULT_MODEL_PATH
 
         if not self.model_path.is_file():
             raise FileNotFoundError(
@@ -250,21 +257,8 @@ def build_ffmpeg_crop_expression(
 
 
 def _probe_dimensions(video_path: Path) -> tuple[int, int]:
-    """Get video width and height using ffprobe."""
-    import json
-    cmd = [
-        "ffprobe", "-v", "error",
-        "-select_streams", "v:0",
-        "-show_entries", "stream=width,height",
-        "-of", "json",
-        str(video_path),
-    ]
-    res = subprocess.run(cmd, capture_output=True, text=True)
-    if res.returncode != 0:
-        raise RuntimeError(f"ffprobe failed: {res.stderr.strip()}")
-    info = json.loads(res.stdout)
-    stream = info["streams"][0]
-    return int(stream["width"]), int(stream["height"])
+    """Get video width and height using ffprobe (backward-compatible delegate)."""
+    return probe_video_dimensions(video_path)
 
 
 def track_face_for_clip(
@@ -275,6 +269,7 @@ def track_face_for_clip(
     clip_filename: str,
     *,
     sample_fps: float = 2.5,
+    model_path: Path | None = None,
 ) -> TrackingResult:
     """Sample video frames across [clip_start, clip_end] to detect and track a face.
 
@@ -291,7 +286,7 @@ def track_face_for_clip(
     if duration <= 0:
         raise ValueError(f"Invalid clip duration: {duration}")
 
-    src_w, src_h = _probe_dimensions(source_video)
+    src_w, src_h = probe_video_dimensions(source_video)
 
     # Compute 9:16 crop window dimensions
     crop_h = src_h
@@ -325,7 +320,7 @@ def track_face_for_clip(
         "-",
     ]
 
-    detector = FaceDetector(input_size=(proxy_w, proxy_h))
+    detector = FaceDetector(model_path=model_path, input_size=(proxy_w, proxy_h))
 
     proc = subprocess.Popen(
         ffmpeg_cmd,

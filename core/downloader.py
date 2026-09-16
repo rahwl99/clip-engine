@@ -1,11 +1,12 @@
 """Downloader — download YouTube source video using yt-dlp."""
 
-import json
 import logging
-import subprocess
 from pathlib import Path
 
 import yt_dlp
+
+from core.exceptions import DownloadError
+from core.ffmpeg import probe_video_dimensions
 
 logger = logging.getLogger(__name__)
 
@@ -32,23 +33,7 @@ _QUALITY_PRESETS: dict[str, dict] = {
 
 def probe_resolution(path: Path) -> tuple[int, int]:
     """Return (width, height) of a video file using ffprobe."""
-    cmd = [
-        "ffprobe",
-        "-v", "error",
-        "-select_streams", "v:0",
-        "-show_entries", "stream=width,height",
-        "-of", "json",
-        str(path),
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise RuntimeError(f"ffprobe failed: {result.stderr.strip()}")
-    try:
-        info = json.loads(result.stdout)
-        stream = info["streams"][0]
-        return int(stream["width"]), int(stream["height"])
-    except (json.JSONDecodeError, KeyError, IndexError, ValueError) as exc:
-        raise RuntimeError(f"Could not parse video dimensions: {exc}") from exc
+    return probe_video_dimensions(path)
 
 
 def download_video(url: str, output_path: Path, *, quality: str = "360p") -> Path:
@@ -58,7 +43,7 @@ def download_video(url: str, output_path: Path, *, quality: str = "360p") -> Pat
     ``main.py`` for lightweight clip previews) or ``"1080p"`` (used by
     ``process.py`` for Full-HD vertical processing).
 
-    Uses yt-dlp to grab an MP4-compatible format.  Raises RuntimeError on
+    Uses yt-dlp to grab an MP4-compatible format. Raises DownloadError on
     failure with a clear message.
     """
     preset = _QUALITY_PRESETS.get(quality)
@@ -91,10 +76,10 @@ def download_video(url: str, output_path: Path, *, quality: str = "360p") -> Pat
         try:
             info = ydl.extract_info(url, download=True)
         except yt_dlp.utils.DownloadError as exc:
-            raise RuntimeError(f"Video download failed: {exc}") from exc
+            raise DownloadError(f"Video download failed: {exc}") from exc
 
     if not info:
-        raise RuntimeError("yt-dlp returned no info after download.")
+        raise DownloadError("yt-dlp returned no info after download.")
 
     # yt-dlp may adjust the extension; find the actual file.
     final = Path(template + ".mp4")
@@ -107,8 +92,7 @@ def download_video(url: str, output_path: Path, *, quality: str = "360p") -> Pat
     if fallback.is_file():
         return fallback
 
-    raise RuntimeError(
+    raise DownloadError(
         f"Download appeared to succeed but output file not found. "
         f"Expected: {final}"
     )
-

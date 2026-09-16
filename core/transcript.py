@@ -1,27 +1,39 @@
 """Transcript retrieval — extract video ID, fetch subtitles via yt-dlp, parse into segments."""
 
+import json
 import re
+import urllib.request
 
 import yt_dlp
 
+from core.exceptions import TranscriptError, VideoIDError
 
 # ── URL handling ──────────────────────────────────────────────────────
 
 _YOUTUBE_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"(?:https?://)?(?:www\.)?youtube\.com/watch\?.*v=(?P<id>[a-zA-Z0-9_-]{11})"),
     re.compile(r"(?:https?://)?(?:www\.)?youtube\.com/shorts/(?P<id>[a-zA-Z0-9_-]{11})"),
+    re.compile(r"(?:https?://)?(?:www\.)?youtube\.com/embed/(?P<id>[a-zA-Z0-9_-]{11})"),
     re.compile(r"(?:https?://)?youtu\.be/(?P<id>[a-zA-Z0-9_-]{11})"),
 ]
 
+_RAW_VIDEO_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{11}$")
 
-def extract_video_id(url: str) -> str:
-    """Extract the 11-character video ID from a YouTube URL."""
-    url = url.strip()
+
+def extract_video_id(url_or_id: str) -> str:
+    """Extract the 11-character video ID from a YouTube URL or return the valid ID directly."""
+    cleaned = url_or_id.strip()
+
+    # Direct 11-character video ID
+    if _RAW_VIDEO_ID_PATTERN.match(cleaned):
+        return cleaned
+
     for pattern in _YOUTUBE_PATTERNS:
-        match = pattern.search(url)
+        match = pattern.search(cleaned)
         if match:
             return match.group("id")
-    raise ValueError(f"Not a valid YouTube URL: {url}")
+
+    raise VideoIDError(f"Not a valid YouTube URL or video ID: {url_or_id}")
 
 
 # ── Transcript fetching ──────────────────────────────────────────────
@@ -36,6 +48,9 @@ def get_transcript(url: str) -> tuple[str, list[dict]]:
     """
     video_id = extract_video_id(url)
 
+    # Standardize URL if raw ID was provided
+    full_url = url if url.startswith("http") else f"https://www.youtube.com/watch?v={video_id}"
+
     opts = {
         "skip_download": True,
         "writesubtitles": True,
@@ -46,17 +61,17 @@ def get_transcript(url: str) -> tuple[str, list[dict]]:
 
     with yt_dlp.YoutubeDL(opts) as ydl:
         try:
-            info = ydl.extract_info(url, download=False)
+            info = ydl.extract_info(full_url, download=False)
         except yt_dlp.utils.DownloadError as exc:
-            raise RuntimeError(f"yt-dlp failed: {exc}") from exc
+            raise TranscriptError(f"yt-dlp failed: {exc}") from exc
 
     if not info:
-        raise RuntimeError("yt-dlp returned no video info.")
+        raise TranscriptError("yt-dlp returned no video info.")
 
     segments = _extract_segments(info)
 
     if not segments:
-        raise RuntimeError(f"No usable English transcript found for video {video_id}.")
+        raise TranscriptError(f"No usable English transcript found for video {video_id}.")
 
     return video_id, segments
 
@@ -85,14 +100,11 @@ def _find_subtitle_url(info: dict) -> str | None:
 
 def _download_json3(url: str) -> dict:
     """Download json3 subtitle data from a URL."""
-    import json
-    import urllib.request
-
     try:
         with urllib.request.urlopen(url, timeout=30) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except Exception as exc:
-        raise RuntimeError(f"Failed to download subtitle data: {exc}") from exc
+        raise TranscriptError(f"Failed to download subtitle data: {exc}") from exc
 
 
 def _parse_json3_events(data: dict) -> list[dict]:
