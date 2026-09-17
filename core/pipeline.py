@@ -11,7 +11,7 @@ import json
 import logging
 import shutil
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -150,6 +150,7 @@ def analyze_video(
             try:
                 generate_clip(source_video, clip.start, clip.end, clip_output)
                 clip.filename = filename
+                clip.clip_id = f"clip_{i + 1:02d}"
                 success_count += 1
                 if progress_callback:
                     progress_callback(f"  \u2713 {filename}")
@@ -185,6 +186,7 @@ def process_video(
     video_id: str,
     *,
     output_dir: Path | str | None = None,
+    clip_ids: Sequence[str] | None = None,
     vertical: bool = ENABLE_VERTICAL,
     face_tracking: bool = ENABLE_FACE_TRACKING,
     subtitles: bool = ENABLE_SUBTITLES,
@@ -198,6 +200,7 @@ def process_video(
     Parameters:
         video_id: YouTube video ID or URL.
         output_dir: Base directory for output (defaults to DEFAULT_OUTPUT_DIR).
+        clip_ids: Optional sequence of specific clip filenames or IDs to process (e.g. ['clip_01', 'clip_02']).
         vertical: If True, crops and scales to 9:16 (1080×1920). If False, keeps source aspect ratio.
         face_tracking: If True (and vertical=True), runs YuNet face tracking.
         subtitles: If True, generates ASS captions and burns them in.
@@ -207,7 +210,7 @@ def process_video(
         progress_callback: Optional callable receiving progress status messages.
 
     Returns:
-        Summary dict containing success_count, fail_count, skip_count, and output_dir.
+        Summary dict containing success_count, fail_count, skip_count, output_dir, and processed_clips.
     """
     base_dir = Path(output_dir) if output_dir else DEFAULT_OUTPUT_DIR
     check_ffmpeg()
@@ -250,6 +253,18 @@ def process_video(
             "clips.json does not contain a source_url.\n"
             "Re-run python main.py <youtube-url> to regenerate clips.json."
         )
+
+    if clip_ids is not None:
+        target_ids = {c.removesuffix(".mp4") for c in clip_ids}
+        clips = [
+            c for c in clips
+            if c.get("filename", "").removesuffix(".mp4") in target_ids
+            or c.get("clip_id") in target_ids
+        ]
+        if not clips:
+            raise ProcessingError(
+                f"None of the requested clip IDs ({', '.join(clip_ids)}) were found in clips.json."
+            )
 
     if progress_callback:
         progress_callback(f"  \u2713 Found {len(clips)} clips\n")
@@ -498,4 +513,9 @@ def process_video(
         "fail_count": fail_count,
         "skip_count": skip_count,
         "output_dir": processed_dir,
+        "processed_clips": [
+            c.get("filename")
+            for c in clips
+            if c.get("filename") and (processed_dir / c["filename"]).is_file()
+        ],
     }

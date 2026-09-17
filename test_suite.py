@@ -126,14 +126,15 @@ def test_missing_transcript_fallback():
 
 def test_no_face_fallback():
     print("[TEST] No face detected fallback...")
-    # Simulated tracking result when 0 faces found
-    res = track_face_for_clip(
-        Path("output/3qHkcs3kG44/clip_01.mp4"),
-        0.0,
-        1.0,
-        "vid_dummy",
-        "clip_dummy.mp4"
-    )
+    sample_clip = Path("output/3qHkcs3kG44/clip_01.mp4")
+    if sample_clip.is_file():
+        res = track_face_for_clip(
+            sample_clip,
+            0.0,
+            1.0,
+            "vid_dummy",
+            "clip_dummy.mp4"
+        )
     # The clip has a face, but let's test the fallback expression builder with empty keyframes
     empty_expr = build_ffmpeg_crop_expression([], crop_w=608, src_w=1920)
     assert empty_expr == str((1920 - 608) // 2)
@@ -575,6 +576,74 @@ def test_programmatic_pipeline_interface():
     print("  ✓ Programmatic engine interface passed without calling sys.exit()")
 
 
+def test_fastapi_endpoints():
+    print("[TEST] FastAPI endpoints (Health, Analyze, Status, Process)...")
+    from fastapi.testclient import TestClient
+    from unittest.mock import patch
+    from api.main import app
+    from api.jobs import job_store
+
+    job_store.clear()
+    client = TestClient(app)
+
+    # 1. Health check
+    res = client.get("/health")
+    assert res.status_code == 200
+    assert res.json() == {"status": "ok"}
+
+    # 2. Analyze validation
+    res = client.post("/jobs/analyze", json={"youtube_url": "invalid_url_string"})
+    assert res.status_code == 400
+
+    # 3. Analyze dispatch
+    with patch("api.routes._executor.submit"):
+        res = client.post("/jobs/analyze", json={"youtube_url": "https://www.youtube.com/watch?v=3qHkcs3kG44"})
+        assert res.status_code == 202
+        job_id = res.json()["job_id"]
+        assert res.json()["status"] == "processing"
+
+    # 4. Job status
+    res = client.get(f"/jobs/{job_id}")
+    assert res.status_code == 200
+    assert res.json()["job_id"] == job_id
+
+    # 404 for nonexistent
+    res = client.get("/jobs/missing123")
+    assert res.status_code == 404
+
+    # 5. Process validation
+    job_store.create_job(job_type="analyze", video_id="3qHkcs3kG44", job_id="test_done")
+    job_store.update_job(
+        "test_done",
+        status="completed",
+        result={
+            "video_id": "3qHkcs3kG44",
+            "clips": [{"clip_id": "clip_01", "filename": "clip_01.mp4"}],
+        },
+    )
+
+    # Invalid clip ID
+    res = client.post("/jobs/test_done/process", json={"clip_ids": ["clip_99"]})
+    assert res.status_code == 400
+
+    # Valid dispatch
+    with patch("api.routes._executor.submit"):
+        res = client.post(
+            "/jobs/test_done/process",
+            json={
+                "clip_ids": ["clip_01"],
+                "vertical": True,
+                "face_tracking": True,
+                "subtitles": True,
+                "subtitle_style": "highlight_yellow",
+            },
+        )
+        assert res.status_code == 202
+        assert res.json()["status"] == "processing"
+
+    print("  ✓ FastAPI endpoints (Health, Analyze, Status, Process) passed")
+
+
 def run_all():
     print("=" * 60)
     print("RUNNING CLIPT AUTOMATED TEST SUITE")
@@ -594,6 +663,7 @@ def run_all():
     test_video_id_validation()
     test_exception_hierarchy()
     test_programmatic_pipeline_interface()
+    test_fastapi_endpoints()
     print("=" * 60)
     print("ALL TESTS PASSED SUCCESSFULLY!")
     print("=" * 60)

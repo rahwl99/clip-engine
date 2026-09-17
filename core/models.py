@@ -17,12 +17,15 @@ class Clip(BaseModel):
     reason: str = Field(..., min_length=1)
     categories: list[str] = Field(default_factory=list)
     filename: str | None = Field(default=None)
+    clip_id: str | None = Field(default=None)
 
     @model_validator(mode="after")
     def _check_timing(self) -> "Clip":
         if self.end <= self.start:
             raise ValueError(f"end ({self.end}) must be after start ({self.start})")
         self.duration = round(self.end - self.start, 3)
+        if not self.clip_id and self.filename:
+            self.clip_id = self.filename.removesuffix(".mp4")
         return self
 
 

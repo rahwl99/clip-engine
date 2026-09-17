@@ -210,3 +210,193 @@ Clipt generates modern, high-energy ASS captions with active word highlighting a
    ```bash
    python test_suite.py
    ```
+
+---
+
+## Docker Usage
+
+Clipt can be run inside a Linux Docker container with all required system tools (FFmpeg, OpenCV YuNet dependencies, font rendering libraries) preconfigured.
+
+### Build
+
+```bash
+docker build -t clipt .
+```
+
+### Check Python & Dependencies
+
+```bash
+docker run --rm clipt python --version
+docker run --rm clipt ffmpeg -version
+docker run --rm clipt ffprobe -version
+```
+
+You can also run the automated test suite inside Docker:
+```bash
+docker run --rm clipt python test_suite.py
+```
+
+### Run Analysis (Step 1)
+
+Execute the analysis and preview clip generation inside Docker:
+
+```bash
+# Linux / macOS
+docker run --rm --env-file .env -v "$(pwd)/output:/app/output" clipt python main.py "<YOUTUBE_URL>"
+
+# Windows PowerShell
+docker run --rm --env-file .env -v "${PWD}/output:/app/output" clipt python main.py "<YOUTUBE_URL>"
+```
+
+### Run Processing (Step 2)
+
+Execute high-quality vertical 9:16 processing, face tracking, and subtitle burn-in:
+
+```bash
+# Linux / macOS
+docker run --rm --env-file .env -v "$(pwd)/output:/app/output" clipt python process.py "<VIDEO_ID>"
+
+# Windows PowerShell
+docker run --rm --env-file .env -v "${PWD}/output:/app/output" clipt python process.py "<VIDEO_ID>"
+```
+
+All CLI flags remain supported:
+```bash
+docker run --rm --env-file .env -v "${PWD}/output:/app/output" clipt python process.py "<VIDEO_ID>" --force --subtitle-style highlight_cyan
+```
+
+### Environment Variables
+
+The `.env` file is **not** included inside the Docker image to protect secrets. API keys (such as `GEMINI_API_KEY`) are passed at runtime via `--env-file .env` or `-e GEMINI_API_KEY="your-key"`.
+
+### Output Mounting
+
+Clipt saves all media and manifests under `output/<video_id>/`. Mounting the host `./output` directory to container `/app/output`:
+
+```bash
+-v "${PWD}/output:/app/output"
+```
+
+ensures that downloaded sources, manifests (`clips.json`), horizontal previews, and final vertical clips (`processedFiles/`) persist on your host machine after the container exits.
+
+---
+
+## FastAPI Server
+
+Clipt provides a lightweight FastAPI application layer wrapping the existing engine for asynchronous, background job-based video repurposing.
+
+### Running the API Server
+
+#### Locally:
+```bash
+uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+#### Inside Docker:
+```bash
+# Windows PowerShell
+docker run --rm -p 8000:8000 --env-file .env -v "${PWD}/output:/app/output" clipt uvicorn api.main:app --host 0.0.0.0 --port 8000
+
+# Linux / macOS
+docker run --rm -p 8000:8000 --env-file .env -v "$(pwd)/output:/app/output" clipt uvicorn api.main:app --host 0.0.0.0 --port 8000
+```
+
+Interactive API documentation (Swagger UI) is available at:
+`http://localhost:8000/docs`
+
+### API Endpoints
+
+#### 1. Health Check
+```http
+GET /health
+```
+Response:
+```json
+{
+  "status": "ok"
+}
+```
+
+#### 2. Start Video Analysis Job
+```http
+POST /jobs/analyze
+Content-Type: application/json
+
+{
+  "youtube_url": "https://www.youtube.com/watch?v=VIDEO_ID"
+}
+```
+Response (`202 Accepted`):
+```json
+{
+  "job_id": "a1b2c3d4e5f6",
+  "status": "processing"
+}
+```
+
+#### 3. Poll Job Status & Results
+```http
+GET /jobs/{job_id}
+```
+- In-progress response:
+```json
+{
+  "job_id": "a1b2c3d4e5f6",
+  "status": "processing",
+  "stage": "analyzing_transcript",
+  "progress": 55,
+  "video_id": "VIDEO_ID"
+}
+```
+- Completed response:
+```json
+{
+  "job_id": "a1b2c3d4e5f6",
+  "status": "completed",
+  "stage": "completed",
+  "progress": 100,
+  "video_id": "VIDEO_ID",
+  "result": {
+    "video_id": "VIDEO_ID",
+    "source_url": "https://www.youtube.com/watch?v=VIDEO_ID",
+    "generated_at": "2026-09-17T12:00:00",
+    "clips": [
+      {
+        "clip_id": "clip_01",
+        "title": "Clip Title",
+        "hook": "Hook text",
+        "reason": "Why this clip works",
+        "score": 95,
+        "start": 10.0,
+        "end": 35.0,
+        "duration": 25.0,
+        "categories": ["productivity"],
+        "filename": "clip_01.mp4"
+      }
+    ]
+  }
+}
+```
+
+#### 4. Process Selected Clips (9:16 Vertical Export)
+```http
+POST /jobs/{job_id}/process
+Content-Type: application/json
+
+{
+  "clip_ids": ["clip_01"],
+  "vertical": true,
+  "face_tracking": true,
+  "subtitles": true,
+  "subtitle_style": "highlight_yellow",
+  "force": false
+}
+```
+Response (`202 Accepted`):
+```json
+{
+  "job_id": "a1b2c3d4e5f6",
+  "status": "processing"
+}
+```
+

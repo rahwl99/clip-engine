@@ -1,0 +1,41 @@
+# Version control
+.git/
+.gitignore
+
+# Environment and secrets
+.env
+.env.*
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Virtual environments
+.venv/
+env/
+venv/
+
+# Editor and IDE metadata
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Output directory and media files (mounted at runtime)
+output/
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.webm
+
+# Documentation / planning notes not required at runtime
+plan.md
+info.md

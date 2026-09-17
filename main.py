@@ -26,9 +26,9 @@ MAX_DURATION: int = DEFAULT_MAX_DURATION   # Maximum clip duration in seconds
 
 def main() -> None:
     """CLI entry point for video analysis and preview clip generation."""
-    if len(sys.argv) < 2:
+    if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
         print("Usage: python main.py <youtube-url>")
-        sys.exit(1)
+        sys.exit(0 if len(sys.argv) >= 2 and sys.argv[1] in ("-h", "--help") else 1)
 
     url = sys.argv[1]
 
